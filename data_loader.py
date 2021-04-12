@@ -41,17 +41,16 @@ class ToTensor(object):
     def __call__(self, sample):
         image, lm, mask = sample['image'], sample['landmark'], sample['mask']
         image = image.transpose((2, 0, 1))
+        mask = image.transpose((2, 0, 1))
         return {
             'image': torch.from_numpy(image), 
             'landmark': torch.from_numpy(lm),
             'mask': torch.from_numpy(mask)
         }
-def data_loader(batchsize=4, num_workers=0):
-    transformed_data = DatasetCustom(csvfile='./input/list.csv', 
-    rootdir='./input/',
+def data_loader(rootdir, batchsize=4, num_workers=0, csvfile='data.csv'):
+    transformed_data = DatasetCustom(csvfile=csvfile, 
+    rootdir=rootdir,
     transform=transforms.Compose([ToTensor()])
     )
     dataloader = DataLoader(transformed_data, batch_size=batchsize, shuffle=True, num_workers=0)
     return dataloader
-
-        
