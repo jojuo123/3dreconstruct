@@ -6,6 +6,7 @@ import torchvision
 
 class Resnet_50_v1(nn.Module):
     def __init__(self, pretrain=True):
+        super().__init__()
         self.resnet = torchvision.models.resnet50(pretrained=pretrain)
         self.conv1 = self.resnet.conv1 
         self.bn1 = self.resnet.bn1 
@@ -31,6 +32,6 @@ class Resnet_50_v1(nn.Module):
         x = self.layer4(x)
 
         x = self.avgpool(x)
-        x = torch.flatten(x, 1)
+        #x = torch.flatten(x, 1)
         return x
     

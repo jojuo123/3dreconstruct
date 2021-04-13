@@ -17,10 +17,10 @@ class Option():
 
         self.save_path = os.path.join(self.model_dir,self.model_name)
         if self.is_train:
-            if not os.path.exists(self.model_save_path):
-                os.makedirs(self.model_save_path)
+            if not os.path.exists(self.save_path):
+                os.makedirs(self.save_path)
 
-        self.summary_dir = os.path.join(self.model_save_path,'summary')
+        self.summary_dir = os.path.join(self.save_path,'summary')
 
         self.train_summary_path = os.path.join(self.summary_dir, 'train')
         self.val_summary_path = os.path.join(self.summary_dir, 'val')
@@ -31,7 +31,8 @@ class Option():
         self.use_pb = True
         #---------------------------------------------------------------------------------------
         # training parameters
-
+        self.root_dir = '../drive/MyDrive/microsoft3dmodel/processed_data/'
+        self.csvfile = 'data.csv'
         self.w_photo = 1.92
         self.w_lm = 1.6e-3
         self.w_id = 0.2

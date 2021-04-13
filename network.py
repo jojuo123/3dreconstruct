@@ -39,12 +39,22 @@ class R_net(nn.Module):
         net_gamma = torch.squeeze(net_gamma)
         net_t_xy = torch.squeeze(net_t_xy)
         net_t_z = torch.squeeze(net_t_z)
+        net_t_z = torch.unsqueeze(net_t_z, 1)
+
+        # print(net_id.shape)
+        # print(net_ex.shape)
+        # print(net_tex.shape)
+        # print(net_angles.shape)
+        # print(net_gamma.shape)
+        # print(net_t_xy.shape)
+        # print(net_t_z.shape)
 
         out = torch.cat((net_id, net_ex, net_tex, net_angles, net_gamma, net_t_xy, net_t_z), 1)
 
         return out
 class Perceptual_Net(nn.Module):
     def __init__(self):
+        super().__init__()
         self.inception = inception_resnet_v1.inception_resnet_v1()
         self.inception.train(False)
         #self.train(False)

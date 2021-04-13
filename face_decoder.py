@@ -89,9 +89,9 @@ class BFM():
         self.meanshape = torch.tensor(model['meanshape'])
         self.idBase = torch.tensor(model['idBase'])
         self.exBase = torch.tensor(model['exBase'].astype(np.float32))
-        self.meanTex = torch.tensor(model['meantex'])
+        self.meantex = torch.tensor(model['meantex'])
         self.texBase = torch.tensor(model['texBase'])
-        self.pointBuf = torch.tensor(model['point_buf'])
+        self.point_buf = torch.tensor(model['point_buf'])
         self.face_buf = torch.tensor(model['tri'])
         self.front_mask_render = torch.squeeze(torch.tensor(model['frontmask2_idx']))
         self.mask_face_buf = torch.tensor(model['tri_mask2'])
@@ -106,7 +106,7 @@ class Face3D(nn.Module):
         self.rasterization_setting = RasterizationSettings(
             image_size=224
         )
-        self.mesh_rasterizer = MeshRasterizer(cameras=None, raster_settings=rasterization_setting)
+        self.mesh_rasterizer = MeshRasterizer(cameras=None, raster_settings=self.rasterization_setting)
         self.shader = SoftPhongShader()
 
         self.renderer = MeshRenderer(self.mesh_rasterizer, self.shader)
@@ -148,8 +148,8 @@ class Face3D(nn.Module):
     def Split_coeff(self, coeff):
         id_coeff = coeff[:, :80]
         ex_coeff = coeff[:, 80:144]
-        tex_coeff = coeff[:, 144:244]
-        angles = coeff[:, 244:227]
+        tex_coeff = coeff[:, 144:224]
+        angles = coeff[:, 224:227]
         gamma = coeff[:, 227:254]
         translation = coeff[:, 254:257]
         camerascale = torch.ones((int(coeff.shape[0]), 1))
@@ -167,16 +167,22 @@ class Face3D(nn.Module):
     def Compute_norm(self, face_shape, facemodel):
         shape = face_shape
         face_id = facemodel.face_buf
-        point_id = face_model.point_buf
+        point_id = facemodel.point_buf
 
         face_id = (face_id - 1).type(torch.int32)
         point_id = (point_id - 1).type(torch.int32)
 
-        v1 = torch.gather(shape, 1, face_id[:, 0])
-        v2 = torch.gather(shape, 1, face_id[:, 1])
-        v3 = torch.gather(shape, 1, face_id[:, 2])
-        e1 = v1 - v2
-        e2 = v2 - v3
+        # print(face_id.shape)
+        # print(shape.shape)
+        vv1 = shape[:, face_id[:, 0], :]
+        vv2 = shape[:, face_id[:, 1], :]
+        vv3 = shape[:, face_id[:, 2], :]
+
+        # v1 = torch.gather(shape, 1, face_id[:, 0])
+        # v2 = torch.gather(shape, 1, face_id[:, 1])
+        # v3 = torch.gather(shape, 1, face_id[:, 2])
+        e1 = vv1 - vv2
+        e2 = vv2 - vv3
         face_norm = torch.cross(e1, e2)
 
         face_norm = F.normalize(face_norm, p=2, dim=2)
@@ -190,6 +196,8 @@ class Face3D(nn.Module):
         return v_norm
 
     def Texture_formation_block(self, tex_coeff, face_model):
+        print(tex_coeff.shape)
+        print(face_model.texBase.shape)
         face_texture = torch.einsum('ij,aj->ai', face_model.texBase, tex_coeff) + face_model.meantex
         face_texture = torch.reshape(face_texture, (
             int(face_texture.shape[0]),

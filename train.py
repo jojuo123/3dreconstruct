@@ -3,13 +3,15 @@ import data_loader
 import reconstruction_model
 import options
 import torch.optim as optim
+import utils3DMM
 
 
 def train():
 
     opt = options.Option()
-    
-    dataloader = data_loader.data_loader()
+
+    utils3DMM.transferBFM09()
+    dataloader = data_loader.data_loader(opt.root_dir)
     net = reconstruction_model.FullModel(opt)
 
     optimizer = optim.Adam(net.parameters(), lr=opt.learning_rate)
@@ -21,7 +23,7 @@ def train():
             inputs = data
             optimizer.zero_grad()
 
-            loss = net(input)
+            loss = net(inputs)
             loss.backward()
             optimizer.step()
 
@@ -33,3 +35,6 @@ def train():
             'model_state_dict': net.state_dict(),
             'loss': loss
         }, opt.save_path)
+
+if __name__ == "__main__":
+  train()
