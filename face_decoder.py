@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import torchvision.models as models
 import numpy as np
 from scipy.io import loadmat
+from options import Option
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import (
     FoVPerspectiveCameras,
@@ -82,21 +83,30 @@ class PointLightsNew(TensorProperties):
             shininess=shininess,
         )
 
+def _validate_light_properties(obj):
+    props = ("ambient_color", "diffuse_color", "specular_color")
+    for n in props:
+        t = getattr(obj, n)
+        if t.shape[-1] != 3:
+            msg = "Expected %s to have shape (N, 3); got %r"
+            raise ValueError(msg % (n, t.shape))
+
 
 class BFM():
     def __init__(self, model_path='./BFM/BFM_model_front.mat'):
         model = loadmat(model_path)
-        self.meanshape = torch.tensor(model['meanshape'])
-        self.idBase = torch.tensor(model['idBase'])
-        self.exBase = torch.tensor(model['exBase'].astype(np.float32))
-        self.meantex = torch.tensor(model['meantex'])
-        self.texBase = torch.tensor(model['texBase'])
-        self.point_buf = torch.tensor(model['point_buf'])
-        self.face_buf = torch.tensor(model['tri'])
-        self.front_mask_render = torch.squeeze(torch.tensor(model['frontmask2_idx']))
-        self.mask_face_buf = torch.tensor(model['tri_mask2'])
-        self.skin_mask = torch.squeeze(torch.tensor(model['skinmask']))
-        self.keypoints = torch.squeeze(torch.tensor(model['keypoints']))
+        self.opt = Option()
+        self.meanshape = torch.tensor(model['meanshape']).to(self.opt.device)
+        self.idBase = torch.tensor(model['idBase']).to(self.opt.device)
+        self.exBase = torch.tensor(model['exBase'].astype(np.float32)).to(self.opt.device)
+        self.meantex = torch.tensor(model['meantex']).to(self.opt.device)
+        self.texBase = torch.tensor(model['texBase']).to(self.opt.device)
+        self.point_buf = torch.tensor(model['point_buf']).to(self.opt.device)
+        self.face_buf = torch.tensor(model['tri']).to(self.opt.device)
+        self.front_mask_render = torch.squeeze(torch.tensor(model['frontmask2_idx'])).to(self.opt.device)
+        self.mask_face_buf = torch.tensor(model['tri_mask2']).to(self.opt.device)
+        self.skin_mask = torch.squeeze(torch.tensor(model['skinmask'])).to(self.opt.device)
+        self.keypoints = torch.squeeze(torch.tensor(model['keypoints'])).to(self.opt.device)
 
 class Face3D(nn.Module):
     def __init__(self):
@@ -110,6 +120,7 @@ class Face3D(nn.Module):
         self.shader = SoftPhongShader()
 
         self.renderer = MeshRenderer(self.mesh_rasterizer, self.shader)
+        self.opt = Option()
 
     def Reconstruction_Block(self, coeff, opt):
         id_coeff,ex_coeff,tex_coeff,angles,translation,gamma,camera_scale,f_scale = self.Split_coeff(coeff)
@@ -127,7 +138,7 @@ class Face3D(nn.Module):
 
         face_color = self.Illumination_block(face_texture, norm_r, gamma)
         #need opt
-        render_block = self.Render_block(face_shape_t, norm_r, face_color, camera_scale, f_scale, self.facemodel, opt.batchsize, opt.is_train)
+        render_block = self.Render_block(face_shape_t, norm_r, face_color, camera_scale, f_scale, self.facemodel, opt.batch_size, opt.is_train)
 
         self.id_coeff = id_coeff
         self.ex_coeff = ex_coeff
@@ -152,8 +163,8 @@ class Face3D(nn.Module):
         angles = coeff[:, 224:227]
         gamma = coeff[:, 227:254]
         translation = coeff[:, 254:257]
-        camerascale = torch.ones((int(coeff.shape[0]), 1))
-        f_scale = torch.ones((int(coeff.shape[0]), 1))
+        camerascale = torch.ones((int(coeff.shape[0]), 1)).to(self.opt.device)
+        f_scale = torch.ones((int(coeff.shape[0]), 1)).to(self.opt.device)
         return id_coeff, ex_coeff, tex_coeff, angles, translation, gamma, camerascale, f_scale
     
     def Shape_formation_block(self, id_coeff, ex_coeff, facemodel):
@@ -174,9 +185,9 @@ class Face3D(nn.Module):
 
         # print(face_id.shape)
         # print(shape.shape)
-        vv1 = shape[:, face_id[:, 0], :]
-        vv2 = shape[:, face_id[:, 1], :]
-        vv3 = shape[:, face_id[:, 2], :]
+        vv1 = shape[:, face_id[:, 0].type(torch.long), :]
+        vv2 = shape[:, face_id[:, 1].type(torch.long), :]
+        vv3 = shape[:, face_id[:, 2].type(torch.long), :]
 
         # v1 = torch.gather(shape, 1, face_id[:, 0])
         # v2 = torch.gather(shape, 1, face_id[:, 1])
@@ -187,17 +198,22 @@ class Face3D(nn.Module):
 
         face_norm = F.normalize(face_norm, p=2, dim=2)
         face_norm = torch.cat((face_norm, 
-        torch.zeros((int(face_shape.shape[0]), 1, 3))
+        torch.zeros((int(face_shape.shape[0]), 1, 3)).to(self.opt.device)
         ), 1)
-        
-        v_norm = torch.sum(torch.gather(face_norm, 1, point_id), 2)
+
+        #print(face_norm.shape)
+        tmp = face_norm[:, point_id.type(torch.long), :]
+        #print(tmp.shape)
+
+        v_norm = torch.sum(tmp, 2)
+        #v_norm = torch.sum(torch.gather(face_norm, 1, point_id), 2)
         v_norm = F.normalize(v_norm, dim=2)
 
         return v_norm
 
     def Texture_formation_block(self, tex_coeff, face_model):
-        print(tex_coeff.shape)
-        print(face_model.texBase.shape)
+        # print(tex_coeff.shape)
+        # print(face_model.texBase.shape)
         face_texture = torch.einsum('ij,aj->ai', face_model.texBase, tex_coeff) + face_model.meantex
         face_texture = torch.reshape(face_texture, (
             int(face_texture.shape[0]),
@@ -210,24 +226,24 @@ class Face3D(nn.Module):
     def Compute_rotation_matrix(self, angles):
         n_data = int(angles.shape[0])
         rotation_X = torch.cat((
-            torch.ones((n_data, 1)),
-            torch.zeros((n_data, 3)),
+            torch.ones((n_data, 1)).to(self.opt.device),
+            torch.zeros((n_data, 3)).to(self.opt.device),
             torch.reshape(torch.cos(angles[:, 0]), (n_data, 1)),
             -torch.reshape(torch.sin(angles[:, 0]), (n_data, 1)),
-            torch.zeros((n_data, 1)),
+            torch.zeros((n_data, 1)).to(self.opt.device),
             torch.reshape(torch.sin(angles[:, 0]), (n_data, 1)),
             torch.reshape(torch.cos(angles[:, 0]), (n_data, 1)),
-        ), 1)
+        ), 1).to(self.opt.device)
 
         rotation_Y = torch.cat(
             (torch.reshape(torch.cos(angles[:,1]),(n_data,1)),
-			torch.zeros((n_data,1)),
+			torch.zeros((n_data,1)).to(self.opt.device),
 			torch.reshape(torch.sin(angles[:,1]),(n_data,1)),
-			torch.zeros((n_data,1)),
-			torch.ones((n_data,1)),
-			torch.zeros((n_data,1)),
+			torch.zeros((n_data,1)).to(self.opt.device),
+			torch.ones((n_data,1)).to(self.opt.device),
+			torch.zeros((n_data,1)).to(self.opt.device),
 			-torch.reshape(torch.sin(angles[:,1]),(n_data,1)),
-			torch.zeros((n_data,1)),
+			torch.zeros((n_data,1)).to(self.opt.device),
 			torch.reshape(torch.cos(angles[:,1]),(n_data,1))),
 			1
 		)
@@ -235,11 +251,11 @@ class Face3D(nn.Module):
         rotation_Z = torch.cat(
             (torch.reshape(torch.cos(angles[:,2]),(n_data,1)),
 			-torch.reshape(torch.sin(angles[:,2]),(n_data,1)),
-			torch.zeros((n_data,1)),
+			torch.zeros((n_data,1)).to(self.opt.device),
 			torch.reshape(torch.sin(angles[:,2]),(n_data,1)),
 			torch.reshape(torch.cos(angles[:,2]),(n_data,1)),
-			torch.zeros([n_data,3]),
-			torch.ones((n_data,1))),
+			torch.zeros([n_data,3]).to(self.opt.device),
+			torch.ones((n_data,1)).to(self.opt.device)),
 			1
 		)
 
@@ -257,21 +273,21 @@ class Face3D(nn.Module):
         focal = torch.tensor(1015.0)
         focal = focal * f_scale
         focal = torch.reshape(focal, (-1, 1))
-        batchsize = int(focal.shape(0))
+        batchsize = int(focal.shape[0])
 
-        camera_pos = torch.reshape(torch.tensor([0.0, 0.0, 10.0]), (1, 1, 3)) * torch.reshape(camera_scale, (-1, 1, 1))
-        reverse_z = torch.tile(torch.reshape(torch.tensor([1.0,0,0,0,1,0,0,0,-1.0]), (1, 3, 3)), (int(face_shape.shape[0]), 1, 1))
+        camera_pos = torch.reshape(torch.tensor([0.0, 0.0, 10.0]).to(self.opt.device), (1, 1, 3)) * torch.reshape(camera_scale, (-1, 1, 1))
+        reverse_z = torch.tile(torch.reshape(torch.tensor([1.0,0,0,0,1,0,0,0,-1.0]), (1, 3, 3)), (int(face_shape.shape[0]), 1, 1)).to(self.opt.device)
 
         p_matrix = torch.cat(
             (
                 focal,
-                torch.zeros((batchsize, 1)),
-                112.0 * torch.ones((batchsize, 1)),
-                torch.zeros((batchsize, 1)),
+                torch.zeros((batchsize, 1)).to(self.opt.device),
+                112.0 * torch.ones((batchsize, 1)).to(self.opt.device),
+                torch.zeros((batchsize, 1)).to(self.opt.device),
                 focal,
-                112.0 * torch.ones((batchsize, 1)),
-                torch.zeros((batchsize, 2)),
-                torch.ones((batchsize, 1)),
+                112.0 * torch.ones((batchsize, 1)).to(self.opt.device),
+                torch.zeros((batchsize, 2)).to(self.opt.device),
+                torch.ones((batchsize, 1)).to(self.opt.device),
             ),
             1
         )
@@ -287,9 +303,10 @@ class Face3D(nn.Module):
     def Compute_landmark(self, face_shape, facemodel):
 
         keypoints_idx = facemodel.keypoints
-        keypoints_idx = (keypoints_idx - 1).type(torch.int32)
-        face_landmark = torch.gather(face_shape, 1, keypoints_idx)
-
+        keypoints_idx = (keypoints_idx - 1).type(torch.long)
+        #print(face_shape.shape)
+        #face_landmark = torch.gather(face_shape, 1, keypoints_idx)
+        face_landmark = face_shape[:, keypoints_idx, :]
         return face_landmark
 
     def Illumination_block(self, face_texture, norm_r, gamma):
@@ -297,15 +314,15 @@ class Face3D(nn.Module):
         n_point = int(norm_r.shape[1])
         gamma = torch.reshape(gamma, (n_data, 3, 9))
 
-        init_lit = torch.tensor([0.8,0,0,0,0,0,0,0,0])
+        init_lit = torch.tensor([0.8,0,0,0,0,0,0,0,0]).to(self.opt.device)
         gamma = gamma + torch.reshape(init_lit, (1, 1, 9))
 
         a0 = m.pi
-        a1 = 2*m.pi / torch.sqrt(torch.tensor(3.0).type(torch.float32))
-        a2 = 2*m.pi / torch.sqrt(torch.tensor(8.0).type(torch.float32))
-        c0 = 1/torch.sqrt(torch.tensor(4 * m.pi).type(torch.float32))
-        c1 = torch.sqrt(torch.tensor(3.0)) / torch.sqrt(torch.tensor(4 * m.pi))
-        c2 = 3 * torch.sqrt(torch.tensor(5.0)) / torch.sqrt(torch.tensor(12 * m.pi))
+        a1 = 2*m.pi / torch.sqrt(torch.tensor(3.0).type(torch.float32)).to(self.opt.device)
+        a2 = 2*m.pi / torch.sqrt(torch.tensor(8.0).type(torch.float32)).to(self.opt.device)
+        c0 = 1/torch.sqrt(torch.tensor(4 * m.pi).type(torch.float32)).to(self.opt.device)
+        c1 = torch.sqrt(torch.tensor(3.0)) / torch.sqrt(torch.tensor(4 * m.pi)).to(self.opt.device)
+        c2 = 3 * torch.sqrt(torch.tensor(5.0)) / torch.sqrt(torch.tensor(12 * m.pi)).to(self.opt.device)
 
         Y = torch.cat(
             (
@@ -342,23 +359,32 @@ class Face3D(nn.Module):
         n_vex = int(facemodel.idBase.shape[0]/3)
 
         fov_y = 2 * torch.atan(112.0 / (1015.0 * f_scale)) * 180.0 / m.pi
-        fov_y = torch.reshape(fov_y, (batchsize))
+        # print(fov_y)
+        # fov_y = torch.reshape(fov_y, (batchsize, 1))
+        fov_y = float(fov_y[0, 0])
 
         face_shape = torch.reshape(face_shape, (batchsize, n_vex, 3))
         face_norm = torch.reshape(face_norm, (batchsize, n_vex, 3))
         face_color = torch.reshape(face_color, (batchsize, n_vex, 3))
 
-        mask_face_shape = torch.gather(face_shape, 1, (facemodel.front_mask_render - 1).type(torch.int32))
-        mask_face_norm = torch.gather(face_norm, 1, (facemodel.front_mask_render - 1).type(torch.int32))
-        mask_face_color = torch.gather(face_color, 1, (facemodel.front_mask_render - 1).type(torch.int32))
+        # mask_face_shape = torch.gather(face_shape, 1, (facemodel.front_mask_render - 1).type(torch.int32))
+        # mask_face_norm = torch.gather(face_norm, 1, (facemodel.front_mask_render - 1).type(torch.int32))
+        # mask_face_color = torch.gather(face_color, 1, (facemodel.front_mask_render - 1).type(torch.int32))
 
-        camera_position = torch.tensor([0, 0, 10,0]) * torch.reshape(camera_scale, (-1, 1))
-        camera_look_at = torch.tensor([0, 0, 0.0])
-        camera_up = torch.tensor([0, 1.0, 0])
+        mask_face_shape = face_shape[:, (facemodel.front_mask_render - 1).type(torch.long), :]
+        mask_face_norm = face_norm[:, (facemodel.front_mask_render - 1).type(torch.long), :]
+        mask_face_color = face_color[:, (facemodel.front_mask_render - 1).type(torch.long), :]
 
-        light_positions = torch.tile(torch.reshape(torch.tensor([0, 0, 1e5]), (1, 1, 3)), (batchsize, 1, 1))
-        light_intensities = torch.tile(torch.reshape(torch.tensor([0.0, 0.0, 0.0]), (1, 1, 3)), (batchsize, 1, 1))
-        ambient_color = torch.tile(torch.reshape(torch.tensor([1.0, 1, 1]), (1, 3)), (batchsize, 1))
+        camera_position = torch.tensor([0, 0, 10.0]).to(self.opt.device) * torch.reshape(camera_scale, (-1, 1))
+        camera_look_at = torch.tensor([0, 0, 0.0]).to(self.opt.device)
+        camera_up = torch.tensor([0, 1.0, 0]).to(self.opt.device)
+
+        camera_look_at = torch.reshape(camera_look_at, (1, 3))
+        camera_up = torch.reshape(camera_up, (1, 3))
+
+        light_positions = torch.tile(torch.reshape(torch.tensor([0, 0, 1e5]).to(self.opt.device), (1, 1, 3)), (batchsize, 1, 1))
+        light_intensities = torch.tile(torch.reshape(torch.tensor([0.0, 0.0, 0.0]).to(self.opt.device), (1, 1, 3)), (batchsize, 1, 1))
+        ambient_color = torch.tile(torch.reshape(torch.tensor([1.0, 1, 1]), (1, 3)), (batchsize, 1)).to(self.opt.device)
 
         #goi 3dpytorch
 
@@ -384,14 +410,35 @@ class Face3D(nn.Module):
         opt = x['opt']
         self.Reconstruction_Block(coeff, opt)
         #goi 3dtorch
+        # print(self.render_block['camera_position'].shape)
+        # print(self.render_block['camera_look_at'].shape)
+        # print(self.render_block['camera_up'].shape)
         camera_look_at_rotation = look_at_rotation(self.render_block['camera_position'], self.render_block['camera_look_at'], self.render_block['camera_up'])
-        camera = FoVPerspectiveCameras(fov=self.render_block['fov_y'], znear=0.01, zfar=50.0, R=camera_look_at_rotation, device=torch.device('cuda:0'))
+
+        
+
+        camera = FoVPerspectiveCameras(fov=self.render_block['fov_y'], znear=0.01, zfar=50.0, R=camera_look_at_rotation, device=self.opt.device)
 
         lights = PointLightsNew(diffuse_color_per_vertex=self.render_block['face_color'], ambient_color=self.render_block['ambient_color'])
 
-        faces = (self.facemodel.mask_face_buf-1).type(torch.int32)
+        faces = (self.facemodel.mask_face_buf-1).type(torch.long)
+        faces_tmp = torch.unsqueeze(faces, 0)
+        tmp = -1*torch.ones((3, faces.shape[0], faces.shape[1])).to(self.opt.device)
+        #print(faces.shape)
+        #print(tmp)
+        faces_tmp = torch.cat([faces_tmp, tmp], dim=0).type(torch.long)
+        #print(faces_tmp.shape)
+        faces_tmp2 = torch.unsqueeze(faces, 0)
+        faces_tmp2 = faces_tmp2.repeat(4, 1, 1)
+        print(faces_tmp2.shape)
 
-        meshes_world = Meshes(verts=self.render_block['mask_face_shape'], faces=faces)
+        #print(self.render_block['mask_face_shape'].shape)
+        #print(faces.shape)
+
+        #print(faces_tmp.shape)
+        #print(self.render_block['mask_face_shape'].shape)
+
+        meshes_world = Meshes(verts=self.render_block['mask_face_shape'], faces=faces_tmp2)
 
         out_img_raw = self.renderer(meshes_world, cameras=camera, lights=lights)
 

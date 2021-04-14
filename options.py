@@ -1,11 +1,15 @@
 import numpy as np 
 import os
+import torch
 
 # training options
 
 class Option():
     def __init__(self,model_name=None,is_train=True):
 		#--------------------------------------------------------------------------------------
+        
+        self.device = torch.device("cpu")
+
         self.is_train = is_train
         self.model_dir = 'result'
         if model_name is None:
@@ -45,7 +49,7 @@ class Option():
         self.w_ex = 0.8
         self.w_tex = 1.7e-2
 
-        self.batch_size = 16
+        self.batch_size = 4
         self.boundaries = [100000]
         lr = [1e-4,2e-5]
         self.learning_rate = 1e-4

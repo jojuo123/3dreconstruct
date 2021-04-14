@@ -27,6 +27,9 @@ class DatasetCustom(Dataset):
         lm = np.reshape(lm, [68, 2])
         mask_file = os.path.join(self.rootdir, 'mask/'+self.datalist.iloc[idx, 0]+'.png')
         mask = io.imread(mask_file)
+
+        
+
         sample = {
             'image': image, 
             'landmark': lm,
@@ -48,10 +51,23 @@ class ToTensor(object):
             'landmark': torch.from_numpy(lm),
             'mask': (torch.from_numpy(mask)).type(torch.float32)
         }
+
+class PreFetch(object):
+    def __call__(self, sample):
+        image, lm, mask = sample['image'], sample['landmark'], sample['mask']
+        image = image.to(torch.device('cpu'))
+        lm = lm.to(torch.device('cpu'))
+        mask = mask.to(torch.device('cpu'))
+        return {
+            'image': image, 
+            'landmark': lm,
+            'mask': mask
+        }
+
 def data_loader(rootdir, batchsize=4, num_workers=0, csvfile='data.csv'):
     transformed_data = DatasetCustom(csvfile=csvfile, 
     rootdir=rootdir,
-    transform=transforms.Compose([ToTensor()])
+    transform=transforms.Compose([ToTensor(), PreFetch()])
     )
     dataloader = DataLoader(transformed_data, batch_size=batchsize, shuffle=True, num_workers=0)
     return dataloader

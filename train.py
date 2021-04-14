@@ -11,8 +11,9 @@ def train():
     opt = options.Option()
 
     utils3DMM.transferBFM09()
-    dataloader = data_loader.data_loader(opt.root_dir)
+    dataloader = data_loader.data_loader(opt.root_dir, batchsize=opt.batch_size)
     net = reconstruction_model.FullModel(opt)
+    #net.cuda()
 
     optimizer = optim.Adam(net.parameters(), lr=opt.learning_rate)
     for epoch in range(opt.train_maxiter):
@@ -21,6 +22,12 @@ def train():
         for idx, data in enumerate(dataloader):
             total_mini_batch += 1
             inputs = data
+            # inputs.to(opt.device)
+            # inputs = {
+            #   'image': data['image'].to(opt.device),
+            #   'lm': data['lm'].to(opt.device)
+            #   ''
+            # }
             optimizer.zero_grad()
 
             loss = net(inputs)
@@ -37,4 +44,5 @@ def train():
         }, opt.save_path)
 
 if __name__ == "__main__":
+  #CUDA_LAUNCH_BLOCKING=1
   train()
