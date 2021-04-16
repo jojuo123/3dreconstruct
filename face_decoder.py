@@ -415,22 +415,22 @@ class Face3D(nn.Module):
         # print(self.render_block['camera_up'].shape)
         camera_look_at_rotation = look_at_rotation(self.render_block['camera_position'], self.render_block['camera_look_at'], self.render_block['camera_up'])
 
-        
-
         camera = FoVPerspectiveCameras(fov=self.render_block['fov_y'], znear=0.01, zfar=50.0, R=camera_look_at_rotation, device=self.opt.device)
 
         lights = PointLightsNew(diffuse_color_per_vertex=self.render_block['face_color'], ambient_color=self.render_block['ambient_color'])
 
-        faces = (self.facemodel.mask_face_buf-1).type(torch.long)
+        lights_mask = PointLightsNew(diffuse_color_per_vertex=self.render_block['mask_face_color'], ambient_color=self.render_block['ambient_color'])
+
+        faces = (self.facemodel.face_buf-1).type(torch.long)
         faces_tmp = torch.unsqueeze(faces, 0)
-        tmp = -1*torch.ones((3, faces.shape[0], faces.shape[1])).to(self.opt.device)
-        #print(faces.shape)
-        #print(tmp)
-        faces_tmp = torch.cat([faces_tmp, tmp], dim=0).type(torch.long)
+        # tmp = -1*torch.ones((3, faces.shape[0], faces.shape[1])).to(self.opt.device)
+        # #print(faces.shape)
+        # #print(tmp)
+        # faces_tmp = torch.cat([faces_tmp, tmp], dim=0).type(torch.long)
         #print(faces_tmp.shape)
         faces_tmp2 = torch.unsqueeze(faces, 0)
         faces_tmp2 = faces_tmp2.repeat(4, 1, 1)
-        print(faces_tmp2.shape)
+        #print(faces_tmp2.shape)
 
         #print(self.render_block['mask_face_shape'].shape)
         #print(faces.shape)
@@ -438,15 +438,47 @@ class Face3D(nn.Module):
         #print(faces_tmp.shape)
         #print(self.render_block['mask_face_shape'].shape)
 
-        meshes_world = Meshes(verts=self.render_block['mask_face_shape'], faces=faces_tmp2)
+        faces_mask = (self.facemodel.mask_face_buf-1).type(torch.long)
+        faces_tmp_mask = torch.unsqueeze(faces_mask, 0)
+        #print(faces_tmp.shape)
+        faces_tmp2_mask = torch.unsqueeze(faces_mask, 0)
+        faces_tmp2_mask = faces_tmp2_mask.repeat(4, 1, 1)
+
+        meshes_world = Meshes(verts=self.face_shape, faces=faces_tmp2)
+
+        meshes_world_mask = Meshes(verts=self.render_block['mask_face_shape'], faces=faces_tmp2_mask)
 
         out_img_raw = self.renderer(meshes_world, cameras=camera, lights=lights)
 
-        
+        img = out_img_raw[:, :, :, :3]
+        mask = out_img_raw[:, :, :, 3:]
+
+        img = torch.flip(img, 3).type(torch.float32)
+        mask = mask.type(torch.float32)
+
+        if (self.opt.is_train):
+            mask_crop = self.renderer(meshes_world_mask, cameras=camera, lights=lights_mask)
+            mask_f = mask_crop[:, :, :, 3:]
+            mask_f = mask_f.type(torch.float32)
+
+            return {
+                'rendered_img': img,
+                'img_mask': mask,
+                'img_mask_crop': mask_f,
+                'landmark_p': self.landmark_p,
+                'id_coeff': self.id_coeff,
+                'ex_coeff': self.ex_coeff,
+                'tex_coeff': self.tex_coeff,
+                'face_texture': self.face_texture,
+                'facemodel': self.facemodel,
+                'gamma': self.gamma
+            }
+
 
         return {
-            'rendered_img': out_img,
-            'img_mask_crop': img_mask_crop,
+            'rendered_img': img,
+            'img_mask': mask,
+            'img_mask_crop': mask,
             'landmark_p': self.landmark_p,
             'id_coeff': self.id_coeff,
             'ex_coeff': self.ex_coeff,
